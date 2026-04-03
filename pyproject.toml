@@ -1,0 +1,40 @@
+[project]
+name = "ai-dev-tools"
+version = "0.1.0"
+description = "Utility CLIs for managing AI workflows inside the Flixie AI workspace."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+keywords = ["ai", "cli", "dev-tools"]
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "typer>=0.9",
+  "rich>=13.5",
+  "numpy>=1.26",
+  "torch>=2.1.0",
+  "tqdm>=4.66",
+  "openai-whisper>=1.1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.0",
+  "ruff>=0.0.293",
+  "isort>=5.12",
+  "uv>=0.9",
+  "pytest>=8",
+  "pip-audit>=2.0",
+  "bandit>=1.8",
+]
+test = [
+  "pytest>=8",
+]
+
+[project.scripts]
+get-transcript = "ai_dev_tools.cli.get_transcript:app"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"

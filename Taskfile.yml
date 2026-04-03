@@ -1,0 +1,18 @@
+version: '3'
+
+# Taskfile for ai-dev-tools.
+# Provides shared CLI helpers and leverages the python base Taskfile.
+includes:
+  python-base:
+    taskfile: '../devtools/python/Taskfile.base.yml'
+    dir: '{{.ROOT_DIR}}'
+    flatten: true
+
+vars:
+  ROOT_DIR: '.'
+  PACKAGE: ai-dev-tools
+
+tasks:
+  check:
+    desc: Run linting, formatting, and tests
+    deps: [lint, unit-test]

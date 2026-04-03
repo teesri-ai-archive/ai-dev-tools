@@ -1,0 +1,40 @@
+name: AI Dev Tools CI
+
+run-name: ai-dev-tools build started 🧰
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          path: workspace/${{ github.event.repository.name }}
+
+      - name: Checkout devtools
+        uses: actions/checkout@v4
+        with:
+          repository: teesri-ai/devtools
+          token: ${{ secrets.MANISH_GITHUB_PAT }}
+          ref: main
+          path: workspace/devtools
+
+      - name: Run Task CI (lint, unit-test, coverage)
+        uses: ./workspace/devtools/.github/actions/run-task-ci
+        with:
+          working-directory: workspace/${{ github.event.repository.name }}
+          python-version: "3.13"
