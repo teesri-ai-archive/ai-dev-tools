@@ -16,7 +16,14 @@ dependencies = [
   "torch>=2.1.0",
   "tqdm>=4.66",
   "openai-whisper>=1.1.10",
+  "ai-tools>=0.1.0",
+  "pydantic>=2.0",
 ]
+
+# Resolve sibling repo when using uv (matches ai-tools / flixie-prompts layout).
+[tool.uv.sources]
+ai-tools = { path = "../ai-tools", editable = true }
+flixie-prompts = { path = "../flixie-prompts", editable = false }
 
 [project.optional-dependencies]
 dev = [
@@ -34,6 +41,7 @@ test = [
 
 [project.scripts]
 get-transcript = "ai_dev_tools.cli.get_transcript:app"
+code-generation = "ai_dev_tools.cli.code_generation:app"
 
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
