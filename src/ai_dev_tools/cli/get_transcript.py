@@ -34,6 +34,19 @@ def format_timestamp(seconds: float) -> str:
     return f"{minutes:02}:{seconds_fraction:06.3f}"
 
 
+def extract_word_entries(result: dict) -> list[dict]:
+    word_entries: list[dict] = []
+    for segment in result.get("segments", []):
+        for word in segment.get("words", []):
+            start = word.get("start")
+            end = word.get("end")
+            word_text = word.get("word", "").strip()
+            if start is None or end is None or not word_text:
+                continue
+            word_entries.append({"start": start, "end": end, "text": word_text})
+    return word_entries
+
+
 class _SilentTqdm:
     def __enter__(self):
         return self
@@ -137,7 +150,19 @@ def main(
         normalized_output = output_file.strip()
         if normalized_output == "-":
             if word_timestamps and "segments" in result:
-                for segment in result["segments"]:
+                word_entries = extract_word_entries(result)
+                if word_entries:
+                    for word in word_entries:
+                        start = format_timestamp(word["start"])
+                        end = format_timestamp(word["end"])
+                        text = word["text"]
+                        console.print(
+                            f"[bold cyan]{start}[/bold cyan] → [bold cyan]{end}[/bold cyan]: {text}"
+                        )
+                    return result
+
+                # Fallback for models/backends that do not return per-word timing.
+                for segment in result.get("segments", []):
                     start = format_timestamp(segment["start"])
                     end = format_timestamp(segment["end"])
                     text = segment.get("text", "").strip()
