@@ -23,7 +23,7 @@ dependencies = [
 # Resolve sibling repo when using uv (matches ai-tools / flixie-prompts layout).
 [tool.uv.sources]
 ai-tools = { path = "../ai-tools", editable = true }
-flixie-prompts = { path = "../flixie-prompts", editable = false }
+flixie-prompts = { path = "../flixie-prompts", editable = true }
 
 [project.optional-dependencies]
 dev = [

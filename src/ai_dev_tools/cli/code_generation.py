@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from pathlib import Path
 import textwrap
 from typing import Annotated
 
@@ -14,7 +13,6 @@ from google.genai.types import ThinkingConfig
 from langchain_core.tools import InjectedToolArg
 from pydantic import BaseModel, Field
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 
@@ -22,8 +20,8 @@ from ai_tools.llms.base import tool
 from ai_tools.llms.gemini import GeminiLLM
 from ai_tools.llms.token_counter import TokenCounter
 from ai_tools.prompt_manager import PromptTemplate, get_and_render_prompt
-
-from ai_dev_tools.cli.ai_execution_types import *
+from ai_dev_tools.code_generation.dsl_emitter import emit_dsl_reference
+from ai_dev_tools.code_generation.dsl_parser import DSLValidationError, parse_and_validate
 
 app = typer.Typer(add_completion=False, help="Gemini thinking-mode video-edit assistant (dev CLI).")
 console = Console()
@@ -47,9 +45,33 @@ Name: video.mp4
 class VideoEditAssistantResponse(BaseModel):
     """Structured final reply after optional tool use."""
 
-    dsl_code: str = Field(
+    dsl_code: str | None = Field(
         ...,
         description="Complete DSL code to edit the video to the user's request.",
+    ),
+    exception_message: str | None= Field(
+        default=None,
+        description="An exception message if the DSL code cannot be generated.",
+    )
+
+
+def _print_dsl_code_panel(dsl_code: str, *, title: str, border_style: str) -> None:
+    console.print(
+        Panel(
+            Syntax(dsl_code, "python", word_wrap=True),
+            title=title,
+            border_style=border_style,
+        )
+    )
+
+
+def _print_text_panel(message: str, *, title: str, border_style: str) -> None:
+    console.print(
+        Panel(
+            message,
+            title=title,
+            border_style=border_style,
+        )
     )
 
 
@@ -97,43 +119,42 @@ def _video_editor_tools():
     @tool
     async def get_sectioning_info(
         logger: Annotated[logging.Logger, InjectedToolArg()],
-    ) -> list[tuple[str, PointInTime]]:
-        """Return a list of human-readable section labels in playback order. The section labels describe the 
-        content of the video. The timestamps are the start time of the section."""
+    ) -> list[tuple[str, str]]:
+        """Return a list of sections in the video. Each element is a tuple of:
+           - human readable section title
+           - serialized 'PointInTime' object"""
         logger.debug("get_sectioning_info invoked")
         return [
-            ("Simplify billing with Metronome", PrecisePointInTime(timestamp_milliseconds=0)),
-            ("How Metronome works", PrecisePointInTime(timestamp_milliseconds=27060)),
-            ("Nova implementation example", PrecisePointInTime(timestamp_milliseconds=75740)),
-            ("Next episode on authentication and API basics", PrecisePointInTime(timestamp_milliseconds=93560)),
+            ("Simplify billing with Metronome", "ts0:00:00.000"),
+            ("How Metronome works", "ts0:00:27.060"),
+            ("Nova implementation example", "ts0:01:15.740"),
+            ("Next episode on authentication and API basics", "ts0:01:33.560"),
         ]
 
     @tool
     async def get_time_range_for_spoken_content(
         logger: Annotated[logging.Logger, InjectedToolArg()],
-        description_of_content_to_look_for: str,
-    ) -> TimeRange:
-        """Return a time range for the spoken content in the video. This will be used by an AI agent to find the spoken content in the video.
-        Please be as specific as possible so that the AI agent can locate exactly the spoken content in the video."""
-        logger.debug("get_time_range_for_spoken_content invoked with description: {}".format(description_of_content_to_look_for))
-        return TimeRange(start=PrecisePointInTime(timestamp_milliseconds=0), end=PrecisePointInTime(timestamp_milliseconds=10000))
+        detailed_description_of_content_to_look_for: str,
+    ) -> str:
+        """Return a (serialized string form of) thetime range for the spoken content in the video. This will be used by an AI agent to find the spoken content in the video.
+        Please be clear and as specific as possible so that the AI agent can locate exactly the spoken content in the video."""
+        logger.debug("get_time_range_for_spoken_content invoked with description: {}".format(detailed_description_of_content_to_look_for))
+        return "serialized_time_range"
 
     return [get_full_transcript, get_summary_of_transcript, get_sectioning_info, get_time_range_for_spoken_content]
 
 
 def _build_system_instruction(logger: logging.Logger) -> str:
     preamble = get_and_render_prompt(PromptTemplate.PROMPT_PREAMBLE, {}, logger)
-    suffix = """
-# Role for this CLI session
-You are a professional video editor working inside Flixie. You only help with video editing tasks.
-
-You have access to tools that return transcript text, a summary of contents, and suggested
-section labels. In this development CLI, tool outputs are stubs unless wired to real pipelines.
-Call them when that information would improve your plan or answer.
-
-When you respond to the user, comply with the required JSON output schema (field `answer`).
-""".strip()
-    return f"{preamble.strip()}\n\n{suffix}"
+    dsl_schema = emit_dsl_reference()
+    return get_and_render_prompt(
+        PromptTemplate.CODING_DSL_RULES_SYSTEM_PROMPT,
+        {
+            "prompt_preamble": preamble.strip(),
+            "dsl_schema": dsl_schema,
+        },
+        logger,
+    )
 
 
 async def _run(
@@ -194,12 +215,53 @@ async def _run(
                 )
             )
 
-    console.print(
-        Panel(
-            Syntax(typed.dsl_code, "python", word_wrap=True),
-            title="Response",
-            border_style="green",
+    has_dsl_code = bool(typed.dsl_code)
+    has_exception = bool(typed.exception_message)
+
+    if has_dsl_code and has_exception:
+        _print_text_panel(
+            "AI response error: returned both `dsl_code` and `exception_message`.",
+            title="Response Error",
+            border_style="red",
         )
+        _print_dsl_code_panel(
+            typed.dsl_code,
+            title="Response (dsl_code)",
+            border_style="yellow",
+        )
+        _print_text_panel(
+            typed.exception_message,
+            title="Response (exception_message)",
+            border_style="yellow",
+        )
+        return
+
+    if has_dsl_code:
+        try:
+            parse_and_validate(typed.dsl_code)
+        except DSLValidationError as exc:
+            _print_dsl_code_panel(
+                typed.dsl_code,
+                title="Response (invalid dsl_code)",
+                border_style="yellow",
+            )
+            _print_text_panel(
+                f"AI response error: generated `dsl_code` failed DSL validation.\n{exc}",
+                title="Response Error",
+                border_style="red",
+            )
+            return
+        _print_dsl_code_panel(typed.dsl_code, title="Response", border_style="green")
+        return
+
+    if has_exception:
+        _print_text_panel(typed.exception_message, title="Exception", border_style="red")
+        return
+
+    _print_text_panel(
+        "Model response did not contain `dsl_code` or `exception_message`.",
+        title="Response Error",
+        border_style="red",
     )
 
 
